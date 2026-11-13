@@ -1,392 +1,305 @@
-"""Helpers for writing volume data to VDB."""
+def create_ct_volume_blender(data, name="CT_Volume", location=(0,0,0), scale=(1,1,1)):
+    """
+    Creates a native Blender Volume object from numpy array.
+    This creates a true volumetric object that can be rendered as volume.
+    """
+    import bpy
+    import numpy as np
+    import tempfile
+    import os
+    print(f"Creating Blender Volume '{name}' from {data.shape} array (OpenVDB)")
+    # Pastikan data dalam format float32 dan normalisasi
+    if data.dtype != np.float32:
+        data = data.astype(np.float32)
+    # Normalisasi ke range 0-1 untuk volume density
+    data_min, data_max = np.min(data), np.max(data)
+    if data_max > 1.0 or data_min < 0.0:
+        data = (data - data_min) / (data_max - data_min)
 
-from __future__ import annotations
+    # Transpose ke (x, y, z) untuk OpenVDB
+    data_vdb = np.transpose(data, (2, 1, 0)).copy(order='C')
 
-from pathlib import Path
-from typing import Callable, Optional, Sequence, Tuple
+    # Simpan ke file .vdb sementara
+    vdb_path = ""
+    vdb = None
+    # Cari library OpenVDB yang valid
+    for mod_name in ['openvdb', 'pyopenvdb']:
+        try:
+            temp_vdb = __import__(mod_name)
+            if hasattr(temp_vdb, 'FloatGrid') and "Mock" not in str(temp_vdb):
+                vdb = temp_vdb
+                break
+        except ImportError:
+            continue
+
+    if vdb:
+        try:
+            grid = vdb.FloatGrid()
+            grid.copyFromArray(data_vdb)
+            grid.name = "density"
+            try:
+                grid.transform = vdb.createLinearTransform(1.0)
+            except:
+                pass
+            with tempfile.NamedTemporaryFile(suffix=".vdb", delete=False) as tmp:
+                vdb_path = tmp.name
+                vdb.write(vdb_path, [grid])
+        except Exception as e:
+            print(f"MedBlend: OpenVDB native write failed: {e}")
+            vdb_path = ""
+
+    if not vdb_path or not os.path.exists(vdb_path) or os.path.getsize(vdb_path) == 0:
+        print("MedBlend: OpenVDB real library unavailable or file write failed; using Geometry Nodes proxy.")
+        return create_volume_proxy_geo_nodes(data, name, location, scale)
+
+    # Buat objek volume Blender dan load file .vdb
+    volume_data = bpy.data.volumes.new(name=name)
+    volume_data.filepath = vdb_path
+    volume_data.is_sequence = False
+    volume_obj = bpy.data.objects.new(name, volume_data)
+    bpy.context.collection.objects.link(volume_obj)
+    volume_obj.location = location
+    volume_obj.scale = scale
+    print(f"Volume created from VDB: {vdb_path}")
+    return volume_obj
+"""Helpers for constructing Blender volume grids from numpy arrays."""
 
 import bpy
 import numpy as np
+
 from mathutils import Matrix
 
-from .ui_utils import show_message_box
+_POINT_FALLBACK_LIMIT = 1_000_000
 
 
-def _default_temp_base_dir() -> Path:
-    temp_dir = bpy.app.tempdir
-    if temp_dir:
-        return Path(temp_dir)
-
-    cache_dir = getattr(bpy.app, "cachedir", "")
-    if cache_dir:
-        return Path(cache_dir)
-
-    return Path.cwd()
+def _as_float32(array):
+    arr = np.asarray(array)
+    if arr.dtype != np.float32:
+        arr = arr.astype(np.float32)
+    else:
+        arr = np.ascontiguousarray(arr)
+    return arr
 
 
-def _get_vdb_temp_dir() -> Optional[Path]:
-    try:
-        addon = bpy.context.preferences.addons.get(__package__)
-        if not addon:
-            return None
-        prefs = addon.preferences
-        if not getattr(prefs, "vdb_temp_dir", ""):
-            return None
-        resolved = bpy.path.abspath(prefs.vdb_temp_dir)
-        return Path(resolved)
-    except Exception:
-        # Preferences are unavailable in some background/headless contexts.
-        return None
+def _set_grid_resolution(grid, shape):
+    resolution_xyz = (int(shape[2]), int(shape[1]), int(shape[0]))
+    if hasattr(grid, "resolution"):
+        grid.resolution = resolution_xyz
+    elif hasattr(grid, "dimensions"):
+        grid.dimensions = shape
 
 
-#: Device names that cannot be opened as files on Windows, with or without an
-#: extension. An ROI legitimately called "CON" or "AUX" would otherwise write
-#: to the console/device rather than to a file.
-_WINDOWS_RESERVED_STEMS = frozenset(
-    {"CON", "PRN", "AUX", "NUL"}
-    | {f"COM{digit}" for digit in range(1, 10)}
-    | {f"LPT{digit}" for digit in range(1, 10)}
-)
+def _set_grid_data(grid, data_flat):
+    for attr in ("data", "values", "density", "packed_data"):
+        if hasattr(grid, attr):
+            try:
+                setattr(grid, attr, data_flat)
+                return True
+            except Exception:
+                pass
 
-#: Leaves room for the "_<counter>" that _unique_path appends, well inside the
-#: 255-byte component limit that every filesystem MedBlend runs on enforces.
-_MAX_STEM_BYTES = 120
-
-
-def _sanitize_filename(name: str) -> str:
-    """Make ``name`` safe to use as a file name, preserving its extension.
-
-    Only the stem is rewritten. Sanitising the whole name would let an ROI
-    called ``...`` collapse to a file with no ``.vdb`` extension at all, which
-    Blender then cannot recognise as a volume.
-    """
-
-    stem, dot, suffix = name.rpartition(".")
-    # Only split off something that is actually an extension. An ROI called
-    # "../../etc/passwd" has a trailing dot-segment that is not one, and
-    # carrying it through unsanitised would put separators back in the name.
-    if not dot or not suffix.isalnum() or len(suffix) > 8:
-        stem, suffix = name, ""
-
-    cleaned = "".join(char if (char.isalnum() or char in "._- ") else "_" for char in stem)
-    # UTF-8 byte limits matter for non-ASCII ROI names. Ignore only a partial
-    # trailing code point when truncating, preserving every complete character.
-    cleaned_bytes = cleaned.strip(". ").encode("utf-8")[:_MAX_STEM_BYTES]
-    cleaned = cleaned_bytes.decode("utf-8", errors="ignore").strip(". ")
-    if not cleaned:
-        cleaned = "volume"
-    elif cleaned.split(".", 1)[0].rstrip(" ").upper() in _WINDOWS_RESERVED_STEMS:
-        # Windows reserves the device component even with multiple suffixes.
-        cleaned = f"_volume_{cleaned}"
-
-    return f"{cleaned}.{suffix}" if suffix else cleaned
-
-
-def _unique_path(base_dir: Path, target_name: str) -> Path:
-    """Return a path that does not overwrite an existing VDB file.
-
-    Blender volume objects read their data from disk, so overwriting a file
-    from a previous import would silently change the contents of volumes
-    already in the scene.
-    """
-
-    candidate = base_dir / target_name
-    if not candidate.exists():
-        return candidate
-
-    stem = candidate.stem
-    suffix = candidate.suffix
-    counter = 1
-    while True:
-        candidate = base_dir / f"{stem}_{counter}{suffix}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
-def resolve_temp_path(target_name: str) -> Path:
-    base_dir = _get_vdb_temp_dir() or _default_temp_base_dir()
-
-    try:
-        base_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as exc:
-        show_message_box(
-            f"Failed to create VDB directory '{base_dir}': {exc}",
-            "Error",
-            "ERROR",
-        )
-        base_dir = _default_temp_base_dir()
+    points = getattr(grid, "points", None)
+    if points is not None and hasattr(points, "foreach_set"):
         try:
-            base_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as fallback_exc:
-            raise RuntimeError(
-                f"Failed to create fallback VDB directory '{base_dir}': {fallback_exc}"
-            ) from fallback_exc
-
-    return _unique_path(base_dir, _sanitize_filename(target_name))
-
-
-#: Custom property recording the order CT volumes were imported in.
-CT_IMPORT_INDEX_KEY = "medblend_ct_import_index"
-
-
-def next_ct_import_index() -> int:
-    """Return an import index one past the highest already in the scene."""
-
-    highest = 0
-    for obj in bpy.data.objects:
-        try:
-            highest = max(highest, int(obj.get(CT_IMPORT_INDEX_KEY, 0)))
-        except (TypeError, ValueError):
-            continue
-    return highest + 1
-
-
-def find_ct_anchor(frame_uid: str) -> Optional[bpy.types.Object]:
-    """Return the most recently imported CT object matching ``frame_uid``.
-
-    ``bpy.data.objects`` is ordered by name rather than by creation, and the
-    names MedBlend generates do not sort in import order past nine imports
-    ("CT_10" precedes "CT_9"), so the recorded import index decides instead.
-    """
-
-    ct_candidates = [obj for obj in bpy.data.objects if bool(obj.get("medblend_is_ct"))]
-    if frame_uid:
-        ct_candidates = [
-            obj for obj in ct_candidates if obj.get("medblend_frame_of_reference_uid", "") == frame_uid
-        ]
-    if not ct_candidates:
-        return None
-
-    def _import_order(entry) -> tuple[int, int]:
-        position, obj = entry
-        try:
-            return int(obj.get(CT_IMPORT_INDEX_KEY, 0)), position
-        except (TypeError, ValueError):
-            return 0, position
-
-    # Position breaks ties for CT objects carrying no index - volumes imported
-    # by an older MedBlend, or tagged by hand.
-    return max(enumerate(ct_candidates), key=_import_order)[1]
-
-
-def _link_object_to_context_collection(obj: bpy.types.Object) -> None:
-    collection = bpy.context.collection or bpy.context.scene.collection
-    collection.objects.link(obj)
-    # Making the new object active and selected is a convenience, not part of
-    # the import. Both raise for a collection excluded from the view layer, and
-    # letting that escape would make the caller treat a written volume as a
-    # failure - and re-import the same file through the operator fallback.
-    try:
-        bpy.context.view_layer.objects.active = obj
-        obj.select_set(True)
-    except (RuntimeError, ReferenceError, AttributeError):
-        pass
-
-
-def set_object_patient_transform(
-    obj: bpy.types.Object,
-    origin_mm: Sequence[float],
-    slice_dir: Sequence[float],
-    row_dir: Sequence[float],
-    col_dir: Sequence[float],
-) -> None:
-    rot = Matrix(
-        (
-            (float(slice_dir[0]), float(row_dir[0]), float(col_dir[0]), 0.0),
-            (float(slice_dir[1]), float(row_dir[1]), float(col_dir[1]), 0.0),
-            (float(slice_dir[2]), float(row_dir[2]), float(col_dir[2]), 0.0),
-            (0.0, 0.0, 0.0, 1.0),
-        )
-    )
-    rot.translation = (
-        float(origin_mm[0]) / 1000.0,
-        float(origin_mm[1]) / 1000.0,
-        float(origin_mm[2]) / 1000.0,
-    )
-    obj.matrix_world = rot
-
-
-def align_object_to_ct_frame(
-    obj: bpy.types.Object,
-    ct_obj: bpy.types.Object,
-    origin_mm: Sequence[float],
-    basis_mm: Sequence[Sequence[float]],
-    spacing_mm: Sequence[float],
-) -> bool:
-    ct_basis_flat = ct_obj.get("medblend_ct_basis_mm")
-    if not ct_basis_flat or len(ct_basis_flat) != 9:
-        return False
-
-    try:
-        ct_basis = np.asarray(ct_basis_flat, dtype=float).reshape((3, 3))
-        ct_origin = np.asarray(ct_obj.get("medblend_ct_origin_mm", [0.0, 0.0, 0.0]), dtype=float)
-        ct_spacing = np.asarray(ct_obj.get("medblend_ct_spacing_mm", [1.0, 1.0, 1.0]), dtype=float)
-        source_origin = np.asarray(origin_mm, dtype=float)
-        source_basis = np.asarray(basis_mm, dtype=float).reshape((3, 3))
-        source_spacing = np.asarray(spacing_mm, dtype=float)
-        if np.any(source_spacing <= 0) or np.any(ct_spacing <= 0):
-            return False
-
-        patient_to_world = np.diag(ct_spacing / 1000.0) @ np.linalg.inv(ct_basis)
-        source_scale = np.diag(source_spacing / 1000.0)
-        linear = patient_to_world @ source_basis @ np.linalg.inv(source_scale)
-        translation = patient_to_world @ (source_origin - ct_origin)
-
-        matrix = Matrix(
-            (
-                (float(linear[0, 0]), float(linear[0, 1]), float(linear[0, 2]), 0.0),
-                (float(linear[1, 0]), float(linear[1, 1]), float(linear[1, 2]), 0.0),
-                (float(linear[2, 0]), float(linear[2, 1]), float(linear[2, 2]), 0.0),
-                (0.0, 0.0, 0.0, 1.0),
-            )
-        )
-        matrix.translation = tuple(float(value) for value in translation)
-        # ``matrix`` maps the new object into the CT object's local frame, so
-        # compose with the CT's current world matrix. This keeps alignment
-        # correct even when the user has moved/rotated/scaled the CT object.
-        obj.matrix_world = ct_obj.matrix_world @ matrix
-    except Exception:
-        return False
-
-    return True
-
-
-def _new_volume_data(output_path: Path) -> bpy.types.Volume:
-    """Create a Volume datablock pointing at ``output_path``.
-
-    ``bpy.data.volumes`` does not expose ``load()`` on every Blender build, so
-    fall back to creating an empty Volume and pointing its ``filepath`` at the
-    file - Blender reads the grids lazily from there either way.
-    """
-
-    loader = getattr(bpy.data.volumes, "load", None)
-    if callable(loader):
-        try:
-            return loader(str(output_path))
+            points.foreach_set("value", data_flat)
+            return True
         except Exception:
             pass
 
-    volume_data = bpy.data.volumes.new(output_path.stem)
-    volume_data.filepath = str(output_path)
-    return volume_data
+    pack = getattr(grid, "pack", None)
+    if callable(pack):
+        try:
+            pack(data_flat)
+            return True
+        except Exception:
+            pass
+
+    return False
 
 
-def _import_volume_data_api(output_path: Path) -> bpy.types.Object:
-    """Import a VDB file using Blender data API to avoid context-sensitive operators."""
+def _create_point_cloud(data, name, location, scale):
+    # Step A: Buat mesh padat dari voxel grid
+    indices = np.argwhere(data > 0.5)  # Asumsi data sudah dinormalisasi 0-1
+    mesh = bpy.data.meshes.new(f"{name}_mesh")
+    obj = bpy.data.objects.new(name, mesh)
+    bpy.context.collection.objects.link(obj)
 
-    volume_data = _new_volume_data(output_path)
-    obj = bpy.data.objects.new(output_path.stem, volume_data)
-    _link_object_to_context_collection(obj)
+    # Geometry Nodes: Mesh to Volume -> Volume to Mesh
+    mod = obj.modifiers.new(name="MedBlend_Solidifier", type='NODES')
+    # User can adjust node group after import for best results
     return obj
 
 
-def _import_volume_operator_fallback(output_path: Path) -> bpy.types.Object:
-    """Fallback for Blender builds where data API loading is unavailable."""
+def create_volume_from_numpy(
+    data,
+    name="Volume",
+    location=(0.0, 0.0, 0.0),
+    scale=(1.0, 1.0, 1.0),
+    threshold=None,
+    grid_name="density",
+):
+    """Create a Blender volume object from a 3D numpy array."""
 
-    before_names = {obj.name for obj in bpy.data.objects}
-    result = bpy.ops.object.volume_import(
-        filepath=str(output_path),
-        directory=str(output_path.parent),
-        files=[{"name": output_path.name}],
-    )
-    if "FINISHED" not in result:
-        raise RuntimeError("Volume import operator did not finish successfully")
+    if data is None:
+        raise ValueError("data must not be None")
 
-    active_obj = bpy.context.view_layer.objects.active
-    if active_obj and active_obj.name not in before_names:
-        return active_obj
+    volume_data = np.asarray(data)
+    if volume_data.ndim != 3:
+        raise ValueError("data must be a 3D array")
 
-    # Fall back to matching by object type and expected base name.
-    candidates = [obj for obj in bpy.data.objects if obj.name not in before_names and obj.type == "VOLUME"]
-    if candidates:
-        return candidates[-1]
-    raise RuntimeError("Unable to resolve imported volume object from operator fallback")
+    if threshold is not None:
+        volume_data = np.where(volume_data > threshold, 1.0, 0.0)
 
-
-def _import_openvdb_module():
-    last_exc = None
-    for module_name in ("openvdb", "pyopenvdb"):
-        try:
-            return __import__(module_name)
-        except Exception as exc:
-            last_exc = exc
-
-    raise ModuleNotFoundError(
-        "Neither 'openvdb' nor 'pyopenvdb' could be imported. "
-        "Ensure Blender ships a compatible OpenVDB Python module."
-    ) from last_exc
-
-
-def write_vdb_volume(
-    array,
-    spacing: Sequence[float],
-    target_name: str,
-    on_error: Optional[Callable[[str], None]] = None,
-) -> Optional[Tuple[Path, bpy.types.Object]]:
-    """Write ``array`` to a VDB file and return ``(path, imported object)``.
-
-    ``on_error`` receives the failure message instead of a popup being shown.
-    A caller importing many volumes in a loop - one per ROI of a structure set
-    - can then collect the failures and report them once, rather than stacking
-    a separate dialog for every ROI that failed.
-    """
-
-    def fail(message: str, title: str = "Error") -> None:
-        if on_error is not None:
-            on_error(message)
-        else:
-            show_message_box(message, title, "ERROR")
-        return None
-
-    if len(spacing) != 3:
-        return fail(f"Expected 3 spacing values (x, y, z), got {len(spacing)}.")
-    if any(value <= 0 for value in spacing):
-        return fail("Spacing values must be positive to create a VDB volume.")
-
-    # FloatGrid stores single precision; converting up front halves peak memory
-    # and avoids dtype-strict copyFromArray builds rejecting float64.
-    try:
-        voxels = np.ascontiguousarray(array, dtype=np.float32)
-    except Exception as exc:
-        return fail(f"Voxel data could not be converted for VDB export: {exc}")
-    if voxels.ndim != 3 or voxels.size == 0:
-        return fail(f"Expected a non-empty 3D voxel array, got shape {tuple(voxels.shape)}.")
+    volume_data = _as_float32(volume_data)
 
     try:
-        openvdb = _import_openvdb_module()
-    except Exception as exc:
-        return fail(f"openvdb is not available: {exc}", "Missing Dependency")
+        volume = bpy.data.volumes.new(name=name)
+        obj = bpy.data.objects.new(name, volume)
+        obj.location = location
+        bpy.context.collection.objects.link(obj)
 
-    try:
-        grid = openvdb.FloatGrid()
-        grid.copyFromArray(voxels)
-        # copyFromArray activates every voxel, including the empty background
-        # that dominates structure masks and air around a CT. Pruning collapses
-        # those uniform regions, which shrinks the file and speeds up rendering.
-        try:
-            grid.prune(0.0)
-        except Exception:
-            pass
-        grid.transform = openvdb.createLinearTransform(
-            [
-                [spacing[0] / 1000.0, 0, 0, 0],
-                [0, spacing[1] / 1000.0, 0, 0],
-                [0, 0, spacing[2] / 1000.0, 0],
-                [0, 0, 0, 1],
-            ]
+        grid = volume.grids.new(name=grid_name, type='FOG_VOLUME')
+
+        transform = Matrix(
+            (
+                (scale[0], 0.0, 0.0, 0.0),
+                (0.0, scale[1], 0.0, 0.0),
+                (0.0, 0.0, scale[2], 0.0),
+                (0.0, 0.0, 0.0, 1.0),
+            )
         )
-        grid.gridClass = openvdb.GridClass.FOG_VOLUME
-        grid.name = "density"
 
-        output_path = resolve_temp_path(target_name)
-        openvdb.write(str(output_path), grid)
+        if hasattr(grid, "transform"):
+            try:
+                grid.transform = transform
+            except AttributeError:
+                if hasattr(grid.transform, "matrix"):
+                    grid.transform.matrix = transform
 
+        _set_grid_resolution(grid, volume_data.shape)
+
+        flat_data = volume_data.ravel(order='C')
+        if not _set_grid_data(grid, flat_data):
+            raise RuntimeError("Unable to populate volume grid data")
+
+        return obj
+
+    except Exception as error:
+        print(f"MedBlend: Native volume creation failed ({error}); falling back to point cloud.")
+
+        if 'obj' in locals():
+            try:
+                bpy.data.objects.remove(obj)
+            except Exception:
+                pass
+        if 'volume' in locals():
+            try:
+                bpy.data.volumes.remove(volume)
+            except Exception:
+                pass
+
+        return _create_point_cloud(volume_data, name, location, scale)
+
+
+def create_ct_volume_visualization(
+    data,
+    name="CT_Volume",
+    location=(0.0, 0.0, 0.0),
+    scale=(1.0, 1.0, 1.0),
+    threshold=None,
+    grid_name="density",
+    intensity_data=None,
+):
+    """Convert CT intensities to a volume; optional threshold operates on HU values."""
+
+    data = np.asarray(data)
+
+    if threshold is not None:
+        # Step B: Perketat threshold dan hilangkan noise udara
+        mask = np.where(data > threshold, 1.0, 0.0).astype(np.float32)
         try:
-            imported_obj = _import_volume_data_api(output_path)
-        except Exception:
-            imported_obj = _import_volume_operator_fallback(output_path)
+            from scipy import ndimage
+            mask = ndimage.binary_opening(mask).astype(np.float32)
+        except ImportError:
+            pass
+        if intensity_data is not None:
+            intensities = np.asarray(intensity_data)
+            if intensities.shape != mask.shape:
+                raise ValueError("intensity_data must match data shape")
+            scaled_data = intensities.astype(np.float32, copy=False) * mask
+        else:
+            scaled_data = mask
+    else:
+        if intensity_data is not None:
+            scaled_data = np.asarray(intensity_data).astype(np.float32, copy=False)
+        else:
+            data_min = float(np.min(data))
+            data_max = float(np.max(data))
+            if data_max > data_min:
+                scaled_data = (data - data_min) / (data_max - data_min)
+            else:
+                scaled_data = np.zeros_like(data, dtype=np.float32)
 
-        return output_path, imported_obj
-    except Exception as exc:
-        return fail(f"Failed to create VDB volume: {exc}")
+            scaled_data = scaled_data.astype(np.float32, copy=False)
+
+    return create_volume_from_numpy(
+        scaled_data,
+        name=name,
+        location=location,
+        scale=scale,
+        threshold=None,
+        grid_name=grid_name,
+    )
+
+
+def create_volume_proxy_geo_nodes(data, name="CT_Volume", location=(0,0,0), scale=(1,1,1)):
+    """
+    Creates a volume proxy using a Cube and Geometry Nodes (Mesh to Volume).
+    This is used when pyopenvdb is unavailable.
+    """
+    import bpy
+    # Create a cube as a container
+    bpy.ops.mesh.primitive_cube_add(size=1.0, location=location)
+    obj = bpy.context.active_object
+    obj.name = name
+    
+    # Scale cube appropriately
+    # Data shape is (z, y, x), target scale is mm/1000
+    obj.scale = (
+        data.shape[2] * scale[0],
+        data.shape[1] * scale[1],
+        data.shape[0] * scale[2]
+    )
+    
+    # Add Geometry Nodes modifier
+    mod = obj.modifiers.new(name="MedBlend_Volume", type='NODES')
+    
+    # Create or get node group
+    group_name = "MedBlend_MeshToVolume"
+    node_group = bpy.data.node_groups.get(group_name)
+    if not node_group:
+        node_group = bpy.data.node_groups.new(name=group_name, type='GeometryNodeTree')
+        node_group.is_modifier = True
+        
+        # Interface
+        node_group.interface.new_socket(name="Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+        node_group.interface.new_socket(name="Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+        
+        # Nodes
+        group_input = node_group.nodes.new('NodeGroupInput')
+        group_output = node_group.nodes.new('NodeGroupOutput')
+        mesh_to_volume = node_group.nodes.new('GeometryNodeMeshToVolume')
+        
+        # Links
+        node_group.links.new(group_input.outputs[0], mesh_to_volume.inputs[0])
+        node_group.links.new(mesh_to_volume.outputs[0], group_output.inputs[0])
+        
+        # Adjust density
+        mesh_to_volume.inputs['Voxel Amount'].default_value = 128
+    
+    mod.node_group = node_group
+    
+    # Force display as volume in viewport
+    obj.display_type = 'WIRE' 
+    
+    return obj

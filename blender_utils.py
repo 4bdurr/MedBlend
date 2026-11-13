@@ -1,39 +1,70 @@
-"""Small Blender data helpers shared by the import operators."""
-
-from __future__ import annotations
-
 import bpy
+import numpy as np
+from pathlib import Path
+
+from .volume_utils import create_volume_from_numpy as _create_volume
+
+
+def create_volume_from_array(
+    data_array,
+    name="Volume",
+    location=(0, 0, 0),
+    scale=(1, 1, 1),
+    grid_name="density",
+    threshold=None,
+):
+    """Create a volume object from a numpy array using the native volume API."""
+    if data_array is None:
+        raise ValueError("data_array must not be None")
+
+    volume_obj = _create_volume(
+        np.asarray(data_array),
+        name=name,
+        location=location,
+        scale=scale,
+        threshold=threshold,
+        grid_name=grid_name,
+    )
+    volume_obj["grid_name"] = grid_name
+    return volume_obj
+
+
+def create_volume_from_numpy(data_array, filename="volume.vdb", transform=None):
+    """Bridge for mock OpenVDB writes to the Geometry Nodes volume creator."""
+    name = Path(filename).stem or "Volume"
+    location = (0.0, 0.0, 0.0)
+    scale = (1.0, 1.0, 1.0)
+
+    if transform is not None and hasattr(transform, "matrix"):
+        matrix = getattr(transform, "matrix")
+        try:
+            scale = (
+                abs(float(matrix[0][0])),
+                abs(float(matrix[1][1])),
+                abs(float(matrix[2][2])),
+            )
+        except (TypeError, ValueError, IndexError):
+            print("MedBlend: Unable to extract scale from transform; using defaults.")
+
+    return _create_volume(np.asarray(data_array), name=name, location=location, scale=scale)
 
 
 def add_data_fields(mesh, data_fields):
-    """Add float point attributes to ``mesh``.
-
-    Adapted from https://github.com/simonbroggi/blender_spreadsheet_import
-    """
-
+    """Add FLOAT point attributes to a mesh for custom data columns."""
     for data_field in data_fields:
-        name = data_field if data_field else "empty_key_string"
-        if name in mesh.attributes:
-            continue
-        mesh.attributes.new(name=name, type="FLOAT", domain="POINT")
+        attribute_name = data_field if data_field else "empty_key_string"
+        if attribute_name not in mesh.attributes:
+            mesh.attributes.new(name=attribute_name, type='FLOAT', domain='POINT')
 
 
 def create_object(mesh, name):
-    """Create an object for ``mesh`` and make it the sole active selection."""
-
-    for other in list(bpy.context.selected_objects):
-        try:
-            other.select_set(False)
-        except RuntimeError:
-            # Objects outside the active view layer cannot be deselected.
-            continue
-
+    """Link a mesh to the current collection and make it active."""
+    for ob in bpy.context.selected_objects:
+        ob.select_set(False)
     obj = bpy.data.objects.new(name, mesh)
-    collection = bpy.context.collection or bpy.context.scene.collection
-    collection.objects.link(obj)
+    bpy.context.collection.objects.link(obj)
     bpy.context.view_layer.objects.active = obj
-    try:
-        obj.select_set(True)
-    except RuntimeError:
-        pass
+    obj.select_set(True)
     return obj
+
+

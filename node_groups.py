@@ -1,442 +1,654 @@
-"""Helpers for loading shared geometry nodes and materials."""
-
-from __future__ import annotations
-
-import math
-import os
-from pathlib import Path
-from typing import Optional, Sequence
-
 import bpy
 
-from .ui_utils import show_message_box
+def dose_material_shader():
+    """
+    Constructs the volume shader for the dose volume
+    
+    """
+    mat = bpy.data.materials.new(name = "Dose Material")
+    mat.use_nodes = True
+    dose_material = mat.node_tree
+	
+    #start with a clean node tree
+    for node in dose_material.nodes:
+        dose_material.nodes.remove(node)
+    #initialize dose_material nodes
+    #node Math
+    math = dose_material.nodes.new("ShaderNodeMath")
+    math.operation = 'MULTIPLY'
+    #Value_001
+    math.inputs[1].default_value = 2.0
+    #Value_002
+    math.inputs[2].default_value = 0.5
+    #node ColorRamp
+    colorramp = dose_material.nodes.new("ShaderNodeValToRGB")
+    colorramp.color_ramp.color_mode = 'RGB'
+    colorramp.color_ramp.hue_interpolation = 'NEAR'
+    colorramp.color_ramp.interpolation = 'LINEAR'
+    colorramp.color_ramp.elements.remove(colorramp.color_ramp.elements[0])
+    colorramp_cre_0 = colorramp.color_ramp.elements[0]
+    colorramp_cre_0.position = 0.0
+    colorramp_cre_0.alpha = 0.0
+    colorramp_cre_0.color = (0.0, 0.0, 0.0, 0.0)
+    colorramp_cre_1 = colorramp.color_ramp.elements.new(0.3227274417877197)
+    colorramp_cre_1.alpha = 0.5
+    colorramp_cre_1.color = (0.0, 0.029376786202192307, 1.0, 0.5)
+    colorramp_cre_2 = colorramp.color_ramp.elements.new(0.6818180680274963)
+    colorramp_cre_2.alpha = 1.0
+    colorramp_cre_2.color = (1.0, 0.7747962474822998, 0.0, 1.0)
+    colorramp_cre_3 = colorramp.color_ramp.elements.new(1.0)
+    colorramp_cre_3.alpha = 1.0
+    colorramp_cre_3.color = (1.0, 0.0041215610690414906, 0.0, 1.0)
+    #node Volume Info
+    volume_info = dose_material.nodes.new("ShaderNodeVolumeInfo")
+    #node ColorRamp.001
+    colorramp_001 = dose_material.nodes.new("ShaderNodeValToRGB")
+    colorramp_001.color_ramp.color_mode = 'RGB'
+    colorramp_001.color_ramp.hue_interpolation = 'NEAR'
+    colorramp_001.color_ramp.interpolation = 'LINEAR'
+    colorramp_001.color_ramp.elements.remove(colorramp_001.color_ramp.elements[0])
+    colorramp_001_cre_0 = colorramp_001.color_ramp.elements[0]
+    colorramp_001_cre_0.position = 0.0
+    colorramp_001_cre_0.alpha = 0.0
+    colorramp_001_cre_0.color = (0.0, 0.0, 0.0, 0.0)
+    colorramp_001_cre_1 = colorramp_001.color_ramp.elements.new(1.0)
+    colorramp_001_cre_1.alpha = 1.0
+    colorramp_001_cre_1.color = (1.0, 1.0, 1.0, 1.0)
+    #node Material Output
+    material_output = dose_material.nodes.new("ShaderNodeOutputMaterial")
+    material_output.target = 'ALL'
+    #Displacement
+    material_output.inputs[2].default_value = (0.0, 0.0, 0.0)
+    #Thickness
+    material_output.inputs[3].default_value = 0.0
+    #node Principled Volume
+    principled_volume = dose_material.nodes.new("ShaderNodeVolumePrincipled")
+    #Color
+    principled_volume.inputs[0].default_value = (0.5, 0.5, 0.5, 1.0)
+    #Color Attribute
+    principled_volume.inputs[1].default_value = ""
+    #Density
+    principled_volume.inputs[2].default_value = 0.0
+    #Density Attribute
+    principled_volume.inputs[3].default_value = "density"
+    #Anisotropy
+    principled_volume.inputs[4].default_value = 0.0
+    #Absorption Color
+    principled_volume.inputs[5].default_value = (0.0, 0.0, 0.0, 1.0)
+    #Blackbody Intensity
+    principled_volume.inputs[8].default_value = 0.0
+    #Blackbody Tint
+    principled_volume.inputs[9].default_value = (1.0, 1.0, 1.0, 1.0)
+    #Temperature
+    principled_volume.inputs[10].default_value = 1000.0
+    #Temperature Attribute
+    principled_volume.inputs[11].default_value = "temperature"
+    #Weight
+    principled_volume.inputs[12].default_value = 0.0
+    #Set locations
+    math.location = (-253.8451385498047, 547.6362915039062)
+    colorramp.location = (-583.43896484375, 330.26849365234375)
+    volume_info.location = (-822.9508056640625, 436.30157470703125)
+    colorramp_001.location = (-581.3194580078125, 565.661865234375)
+    material_output.location = (344.9896545410156, 601.4866943359375)
+    principled_volume.location = (-74.74122619628906, 568.8428344726562)
+    #Set dimensions
+    math.width, math.height = 140.0, 100.0
+    colorramp.width, colorramp.height = 240.0, 100.0
+    volume_info.width, volume_info.height = 140.0, 100.0
+    colorramp_001.width, colorramp_001.height = 240.0, 100.0
+    material_output.width, material_output.height = 140.0, 100.0
+    principled_volume.width, principled_volume.height = 240.0, 100.
+    #initialize dose_material links
+    #colorramp_001.Color -> math.Value
+    dose_material.links.new(colorramp_001.outputs[0], math.inputs[0])
+    #volume_info.Density -> colorramp.Fac
+    dose_material.links.new(volume_info.outputs[1], colorramp.inputs[0])
+    #volume_info.Density -> colorramp_001.Fac
+    dose_material.links.new(volume_info.outputs[1], colorramp_001.inputs[0])
+    #math.Value -> principled_volume.Emission Strength
+    dose_material.links.new(math.outputs[0], principled_volume.inputs[6])
+    #colorramp.Color -> principled_volume.Emission Color
+    dose_material.links.new(colorramp.outputs[0], principled_volume.inputs[7])
+    #principled_volume.Volume -> material_output.Volume
+    dose_material.links.new(principled_volume.outputs[0], material_output.inputs[1])
 
-#: Group input pairs the shipped image, dose and spot materials expose for
-#: their window. Imported data keeps its own units - Hounsfield units, absolute
-#: dose in Gy, spot meterset weights - so the material has to be told the range
-#: they cover before its colour ramp, which is addressed by ``0 - 1``, means
-#: anything.
-_WINDOW_INPUT_PAIRS = (
-    ("Min HU", "Max HU"),
-    ("Min Dose", "Max Dose"),
-    ("Min Spot Weight", "Max Spot Weight"),
-)
-
-#: Custom property recording the window a material copy was built for.
-_WINDOW_PROPERTY = "medblend_material_window"
+def apply_dose_shader():
+    return dose_material_shader()
 
 
-def _blend_library_path() -> Path:
-    return Path(__file__).resolve().parent / "assets" / "MedBlend_Assets.blend"
-
-
-def append_item_from_blend(file_path: Path, item_type: str, item_name: str) -> None:
-    directory = str(file_path / item_type)
-    bpy.ops.wm.append(directory=directory + os.sep, filename=item_name)
-
-
-def _load_material(shader_name: str) -> Optional[bpy.types.Material]:
-    if shader_name not in bpy.data.materials:
-        try:
-            append_item_from_blend(_blend_library_path(), "Material", shader_name)
-        except Exception:
-            pass
-
-    material = bpy.data.materials.get(shader_name)
-    if material is None:
-        show_message_box(
-            f"Material '{shader_name}' could not be loaded from the MedBlend asset library.",
-            "Warning",
-            "ERROR",
-        )
-    return material
-
-
-def _assign_material(obj: Optional[bpy.types.Object], material: bpy.types.Material) -> bool:
-    if obj is None or obj.data is None or not hasattr(obj.data, "materials"):
-        return False
-    if not any(slot_material is material for slot_material in obj.data.materials):
-        obj.data.materials.append(material)
-    return True
-
-
-# Blender truncates datablock names past this length. A truncated name would
-# never match the cache lookup below, so every re-import would copy the
-# material again and the file would accumulate one copy per import.
-_MAX_DATABLOCK_NAME = 63
-
-
-def _variant_name(base_name: str, counter: int) -> str:
-    """Name a per-window or per-colour copy so the cache lookup can find it."""
-
-    suffix = "" if counter == 0 else f"_{counter}"
-    return base_name[: _MAX_DATABLOCK_NAME - len(suffix)] + suffix
-
-
-def _socket(node, name: str):
-    """Return an input socket by name, or ``None`` when the node has no such input."""
-
-    inputs = getattr(node, "inputs", None)
-    if inputs is None:
-        return None
-    try:
-        return inputs[name]
-    except (KeyError, TypeError, IndexError):
-        return None
-
-
-def _valid_window(data_range: Optional[Sequence[float]]) -> Optional[tuple[float, float]]:
-    if data_range is None:
-        return None
-    try:
-        low, high = float(data_range[0]), float(data_range[1])
-    except (TypeError, ValueError, IndexError, KeyError):
-        return None
-    if not math.isfinite(low) or not math.isfinite(high) or high <= low:
-        return None
-    return low, high
-
-
-def _window_sockets(material: bpy.types.Material) -> list:
-    """Every writable window input pair among the material's nodes.
-
-    A pair driven by a link is skipped: the user is setting the window
-    themselves, and a default behind a link does nothing visible anyway.
+        
+def image_material_shader():
+    """
+    Constructs the volume shader for the CT and MRI images
+    
     """
 
-    node_tree = getattr(material, "node_tree", None)
-    if node_tree is None:
-        return []
+    mat = bpy.data.materials.new(name = "Image Material")
+    mat.use_nodes = True
+	#initialize image_material node group
 
-    pairs = []
-    for node in getattr(node_tree, "nodes", ()):
-        for names in _WINDOW_INPUT_PAIRS:
-            sockets = [_socket(node, name) for name in names]
-            if any(socket is None for socket in sockets):
-                continue
-            if any(getattr(socket, "is_linked", False) for socket in sockets):
-                continue
-            pairs.append(sockets)
-    return pairs
+    image_material = mat.node_tree
+    #start with a clean node tree
+    for node in image_material.nodes:
+        image_material.nodes.remove(node)
+    #initialize image_material nodes
+    #node Material Output
+    material_output = image_material.nodes.new("ShaderNodeOutputMaterial")
+    material_output.target = 'ALL'
+    #Displacement
+    material_output.inputs[2].default_value = (0.0, 0.0, 0.0)
+    #Thickness
+    material_output.inputs[3].default_value = 0.0    
+    #node Math
+    math = image_material.nodes.new("ShaderNodeMath")
+    math.operation = 'MULTIPLY'
+    #Value_001
+    math.inputs[1].default_value = 5.0
+    #Value_002
+    math.inputs[2].default_value = 0.5    
+    #node ColorRamp
+    colorramp = image_material.nodes.new("ShaderNodeValToRGB")
+    colorramp.color_ramp.color_mode = 'RGB'
+    colorramp.color_ramp.hue_interpolation = 'NEAR'
+    colorramp.color_ramp.interpolation = 'LINEAR'    
+    colorramp.color_ramp.elements.remove(colorramp.color_ramp.elements[0])
+    colorramp_cre_0 = colorramp.color_ramp.elements[0]
+    colorramp_cre_0.position = 0.0
+    colorramp_cre_0.alpha = 0.0
+    colorramp_cre_0.color = (0.0, 0.0, 0.0, 0.0)   
+    colorramp_cre_1 = colorramp.color_ramp.elements.new(1.0)
+    colorramp_cre_1.alpha = 1.0
+    colorramp_cre_1.color = (1.0, 1.0, 1.0, 1.0)
+    #node Volume Info
+    volume_info = image_material.nodes.new("ShaderNodeVolumeInfo")   
+    #node Principled Volume
+    principled_volume = image_material.nodes.new("ShaderNodeVolumePrincipled")
+    #Color
+    principled_volume.inputs[0].default_value = (0.5, 0.5, 0.5, 1.0)
+    #Color Attribute
+    principled_volume.inputs[1].default_value = ""
+    #Density
+    principled_volume.inputs[2].default_value = 0.0
+    #Density Attribute
+    principled_volume.inputs[3].default_value = "density"
+    #Anisotropy
+    principled_volume.inputs[4].default_value = 0.0
+    #Absorption Color
+    principled_volume.inputs[5].default_value = (0.0, 0.0, 0.0, 1.0)
+    #Blackbody Intensity
+    principled_volume.inputs[8].default_value = 0.0
+    #Blackbody Tint
+    principled_volume.inputs[9].default_value = (1.0, 1.0, 1.0, 1.0)
+    #Temperature
+    principled_volume.inputs[10].default_value = 1000.0
+    #Temperature Attribute
+    principled_volume.inputs[11].default_value = "temperature"
+    #Weight
+    principled_volume.inputs[12].default_value = 0.0    
+    #Set locations
+    material_output.location = (300.0, 300.0)
+    math.location = (-290.64935302734375, 185.22756958007812)
+    colorramp.location = (-650.9771118164062, 14.403594970703125)
+    volume_info.location = (-876.3124389648438, -123.81324768066406)
+    principled_volume.location = (-85.48944091796875, 91.50717163085938)   
+    #Set dimensions
+    material_output.width, material_output.height = 140.0, 100.0
+    math.width, math.height = 140.0, 100.0
+    colorramp.width, colorramp.height = 240.0, 100.0
+    volume_info.width, volume_info.height = 140.0, 100.0
+    principled_volume.width, principled_volume.height = 240.0, 100.0    
+    #initialize image_material links
+    #colorramp.Color -> math.Value
+    image_material.links.new(colorramp.outputs[0], math.inputs[0])
+    #colorramp.Color -> principled_volume.Emission Color
+    image_material.links.new(colorramp.outputs[0], principled_volume.inputs[7])
+    #volume_info.Density -> colorramp.Fac
+    image_material.links.new(volume_info.outputs[1], colorramp.inputs[0])
+    #math.Value -> principled_volume.Emission Strength
+    image_material.links.new(math.outputs[0], principled_volume.inputs[6])
+    #principled_volume.Volume -> material_output.Volume
+    image_material.links.new(principled_volume.outputs[0], material_output.inputs[1])
 
 
-def _set_material_window(material: bpy.types.Material, window: Sequence[float]) -> None:
-    """Point every writable window input in ``material`` at ``window``."""
-
-    low, high = float(window[0]), float(window[1])
-    for low_socket, high_socket in _window_sockets(material):
-        low_socket.default_value = low
-        high_socket.default_value = high
-    material[_WINDOW_PROPERTY] = [low, high]
-
-
-def _material_has_window(material: bpy.types.Material, window: Sequence[float]) -> bool:
-    stored = material.get(_WINDOW_PROPERTY) if hasattr(material, "get") else None
-    try:
-        if stored is None or len(stored) != 2:
-            return False
-        return all(
-            abs(float(a) - float(b)) <= 1e-6
-            for a, b in zip(window, stored, strict=True)
-        )
-    except (TypeError, ValueError):
-        return False
+def apply_image_shader(obj=None):
+    mat = image_material_shader()
+    if obj and hasattr(obj.data, "materials"):
+        if not obj.data.materials:
+            obj.data.materials.append(mat)
+        else:
+            obj.data.materials[0] = mat
+    return mat
 
 
-def _fill_zero_inputs(material: bpy.types.Material, values: dict[str, float]) -> None:
-    """Set each named, unlinked input that is still at zero to its value.
+def ct_volume_to_mesh_node_group():
+    ct_volume_to_mesh= bpy.data.node_groups.new(type = "GeometryNodeTree", name = "CT Volume to Mesh")
+    #initialize ct_volume_to_mesh nodes
+    #ct_volume_to_mesh inputs
+    #input Geometry
+    ct_volume_to_mesh.inputs.new('NodeSocketGeometry', "Geometry")
+    ct_volume_to_mesh.inputs[0].attribute_domain = 'POINT'
+    #node Group Input
+    group_input = ct_volume_to_mesh.nodes.new("NodeGroupInput")
+    #node Cube
+    cube = ct_volume_to_mesh.nodes.new("GeometryNodeMeshCube")
+    #Vertices X
+    cube.inputs[1].default_value = 2
+    #Vertices Y
+    cube.inputs[2].default_value = 2
+    #Vertices Z
+    cube.inputs[3].default_value = 2
+    #node Mesh Boolean
+    mesh_boolean = ct_volume_to_mesh.nodes.new("GeometryNodeMeshBoolean")
+    mesh_boolean.operation = 'INTERSECT'
+    #Self Intersection
+    mesh_boolean.inputs[2].default_value = False
+    #Hole Tolerant
+    mesh_boolean.inputs[3].default_value = False
+    #node Vector
+    vector = ct_volume_to_mesh.nodes.new("FunctionNodeInputVector")
+    vector.vector = (0.49000000953674316, 3.0299997329711914, 0.38999998569488525)
+    #node Transform Geometry
+    transform_geometry = ct_volume_to_mesh.nodes.new("GeometryNodeTransform")
+    #Translation
+    transform_geometry.inputs[1].default_value = (0.17000000178813934, -1.119999885559082, 0.35999998450279236)
+    #Rotation
+    transform_geometry.inputs[2].default_value = (0.0, 0.0, 0.0)
+    #Scale
+    transform_geometry.inputs[3].default_value = (1.0, 1.0, 1.0)
+    #node Set Shade Smooth
+    set_shade_smooth = ct_volume_to_mesh.nodes.new("GeometryNodeSetShadeSmooth")
+    #Selection
+    set_shade_smooth.inputs[1].default_value = True
+    #Shade Smooth
+    set_shade_smooth.inputs[2].default_value = True
+    #node Set Material
+    set_material = ct_volume_to_mesh.nodes.new("GeometryNodeSetMaterial")
+    #Selection
+    set_material.inputs[1].default_value = True
+    if "CT Shader" in bpy.data.materials:
+        set_material.inputs[2].default_value = bpy.data.materials["CT Shader"]
+    #ct_volume_to_mesh outputs
+    #output Geometry
+    ct_volume_to_mesh.outputs.new('NodeSocketGeometry', "Geometry")
+    ct_volume_to_mesh.outputs[0].attribute_domain = 'POINT'
+    #node Group Output
+    group_output = ct_volume_to_mesh.nodes.new("NodeGroupOutput")
+    #node Realize Instances
+    realize_instances = ct_volume_to_mesh.nodes.new("GeometryNodeRealizeInstances")
+    #node Volume to Mesh
+    volume_to_mesh = ct_volume_to_mesh.nodes.new("GeometryNodeVolumeToMesh")
+    volume_to_mesh.resolution_mode = 'VOXEL_SIZE'
+    #Voxel Size
+    volume_to_mesh.inputs[1].default_value = 0.0010000000474974513
+    #Voxel Amount
+    volume_to_mesh.inputs[2].default_value = 64.0
+    #Threshold
+    volume_to_mesh.inputs[3].default_value = 0.2750000059604645
+    #Adaptivity
+    volume_to_mesh.inputs[4].default_value = 0.0
+    #Set locations
+    group_input.location = (-458.56182861328125, -7.376960754394531)
+    cube.location = (-430.8788146972656, -136.57339477539062)
+    mesh_boolean.location = (86.18502807617188, 71.75001525878906)
+    vector.location = (-666.7454833984375, -171.49755859375)
+    transform_geometry.location = (-170.8945770263672, -139.24826049804688)
+    set_shade_smooth.location = (306.3999938964844, 91.71622467041016)
+    set_material.location = (526.4000244140625, 75.61817169189453)
+    group_output.location = (966.511962890625, 73.02522277832031)
+    realize_instances.location = (746.4000244140625, 96.59512329101562)
+    volume_to_mesh.location = (-180.77464294433594, 49.2681884765625)
+    #Set dimensions
+    group_input.width, group_input.height = 140.0, 100.0
+    cube.width, cube.height = 140.0, 100.0
+    mesh_boolean.width, mesh_boolean.height = 140.0, 100.0
+    vector.width, vector.height = 140.0, 100.0
+    transform_geometry.width, transform_geometry.height = 140.0, 100.0
+    set_shade_smooth.width, set_shade_smooth.height = 140.0, 100.0
+    set_material.width, set_material.height = 140.0, 100.0
+    group_output.width, group_output.height = 140.0, 100.0
+    realize_instances.width, realize_instances.height = 140.0, 100.0
+    volume_to_mesh.width, volume_to_mesh.height = 170.0, 100.0
+    #initialize ct_volume_to_mesh links
+    #group_input.Geometry -> volume_to_mesh.Volume
+    ct_volume_to_mesh.links.new(group_input.outputs[0], volume_to_mesh.inputs[0])
+    #cube.Mesh -> transform_geometry.Geometry
+    ct_volume_to_mesh.links.new(cube.outputs[0], transform_geometry.inputs[0])
+    #volume_to_mesh.Mesh -> mesh_boolean.Mesh 1
+    ct_volume_to_mesh.links.new(volume_to_mesh.outputs[0], mesh_boolean.inputs[0])
+    #transform_geometry.Geometry -> mesh_boolean.Mesh 2
+    ct_volume_to_mesh.links.new(transform_geometry.outputs[0], mesh_boolean.inputs[1])
+    #volume_to_mesh.Mesh -> mesh_boolean.Mesh 2
+    ct_volume_to_mesh.links.new(volume_to_mesh.outputs[0], mesh_boolean.inputs[1])
+    #vector.Vector -> cube.Size
+    ct_volume_to_mesh.links.new(vector.outputs[0], cube.inputs[0])
+    #mesh_boolean.Mesh -> set_shade_smooth.Geometry
+    ct_volume_to_mesh.links.new(mesh_boolean.outputs[0], set_shade_smooth.inputs[0])
+    #realize_instances.Geometry -> group_output.Geometry
+    ct_volume_to_mesh.links.new(realize_instances.outputs[0], group_output.inputs[0])
+    #set_shade_smooth.Geometry -> set_material.Geometry
+    ct_volume_to_mesh.links.new(set_shade_smooth.outputs[0], set_material.inputs[0])
+    #set_material.Geometry -> realize_instances.Geometry
+    ct_volume_to_mesh.links.new(set_material.outputs[0], realize_instances.inputs[0])
+    return ct_volume_to_mesh
 
-    An input the user has already given a value in their own copy of the
-    asset is left as they set it.
+
+
+def add_CT_to_volume_geo_nodes():
+    ct_volume_to_mesh = ct_volume_to_mesh_node_group()
+    name = bpy.context.object.name
+    obj = bpy.data.objects[name]
+    mod = obj.modifiers.new(name = "CT Volume to Mesh", type = 'NODES')
+    mod.node_group = ct_volume_to_mesh
+
+
+
+
+
+def proton_spots_node_group():
+    """
+     Creates the geometry node group for the proton spots. Loads spot weights and spot postions and assembles the geometry for the proton spots.
+     
+    """
+    proton_spots = bpy.data.node_groups.new(type = 'GeometryNodeTree', name = "Proton_Spots")    
+    proton_spots.is_modifier = True
+    
+    #initialize proton_spots nodes
+    #proton_spots interface
+    #Socket Geometry
+    geometry_socket = proton_spots.interface.new_socket(name = "Geometry", in_out='OUTPUT', socket_type = 'NodeSocketGeometry')
+    geometry_socket.attribute_domain = 'POINT'
+    
+    #Socket Geometry
+    geometry_socket_1 = proton_spots.interface.new_socket(name = "Geometry", in_out='INPUT', socket_type = 'NodeSocketGeometry')
+    geometry_socket_1.attribute_domain = 'POINT'
+    
+    #Socket Effective Source Empty
+    effective_source_empty_socket = proton_spots.interface.new_socket(name = "Effective Source Empty", in_out='INPUT', socket_type = 'NodeSocketObject')
+    effective_source_empty_socket.attribute_domain = 'POINT'
+    effective_source_empty_socket.description = "Beam Source Empty"
+    
+    #Socket Point Size
+    point_size_socket = proton_spots.interface.new_socket(name = "Point Size", in_out='INPUT', socket_type = 'NodeSocketFloat')
+    point_size_socket.subtype = 'NONE'
+    point_size_socket.default_value = 0.0003000000142492354
+    point_size_socket.min_value = 0.0
+    point_size_socket.max_value = 10000.0
+    point_size_socket.attribute_domain = 'POINT'
+    
+    #Socket Beam Radius
+    beam_radius_socket = proton_spots.interface.new_socket(name = "Beam Radius", in_out='INPUT', socket_type = 'NodeSocketFloat')
+    beam_radius_socket.subtype = 'DISTANCE'
+    beam_radius_socket.default_value = 0.0010000000474974513
+    beam_radius_socket.min_value = 0.0
+    beam_radius_socket.max_value = 3.4028234663852886e+38
+    beam_radius_socket.attribute_domain = 'POINT'
+    
+    #Socket Spot Index
+    spot_index_socket = proton_spots.interface.new_socket(name = "Spot Index", in_out='INPUT', socket_type = 'NodeSocketInt')
+    spot_index_socket.subtype = 'NONE'
+    spot_index_socket.default_value = 0
+    spot_index_socket.min_value = -2147483648
+    spot_index_socket.max_value = 2147483647
+    spot_index_socket.attribute_domain = 'POINT'
+    
+    
+    #node Group Output
+    group_output = proton_spots.nodes.new("NodeGroupOutput")
+    group_output.name = "Group Output"
+    group_output.is_active_output = True
+    
+    #node Named Attribute
+    named_attribute = proton_spots.nodes.new("GeometryNodeInputNamedAttribute")
+    named_attribute.name = "Named Attribute"
+    named_attribute.data_type = 'FLOAT'
+    #Name
+    named_attribute.inputs[0].default_value = "spot_x"
+    
+    #node Named Attribute.001
+    named_attribute_001 = proton_spots.nodes.new("GeometryNodeInputNamedAttribute")
+    named_attribute_001.name = "Named Attribute.001"
+    named_attribute_001.data_type = 'FLOAT'
+    #Name
+    named_attribute_001.inputs[0].default_value = "spot_y"
+    
+    #node Set Point Radius
+    set_point_radius = proton_spots.nodes.new("GeometryNodeSetPointRadius")
+    set_point_radius.name = "Set Point Radius"
+    #Selection
+    set_point_radius.inputs[1].default_value = True
+    
+    #node Named Attribute.002
+    named_attribute_002 = proton_spots.nodes.new("GeometryNodeInputNamedAttribute")
+    named_attribute_002.name = "Named Attribute.002"
+    named_attribute_002.data_type = 'FLOAT'
+    #Name
+    named_attribute_002.inputs[0].default_value = "spot_E"
+    
+    #node Named Attribute.003
+    named_attribute_003 = proton_spots.nodes.new("GeometryNodeInputNamedAttribute")
+    named_attribute_003.name = "Named Attribute.003"
+    named_attribute_003.data_type = 'FLOAT'
+    #Name
+    named_attribute_003.inputs[0].default_value = "spot_weight"
+    
+    #node Set Position
+    set_position = proton_spots.nodes.new("GeometryNodeSetPosition")
+    set_position.name = "Set Position"
+    #Selection
+    set_position.inputs[1].default_value = True
+    #Offset
+    set_position.inputs[3].default_value = (0.0, 0.0, 0.0)
+    
+    #node Set Material
+    set_material = proton_spots.nodes.new("GeometryNodeSetMaterial")
+    set_material.name = "Set Material"
+    #Selection
+    set_material.inputs[1].default_value = True
+    if "Material" in bpy.data.materials:
+        set_material.inputs[2].default_value = bpy.data.materials["Material"]
+    
+    #node Join Geometry
+    join_geometry = proton_spots.nodes.new("GeometryNodeJoinGeometry")
+    join_geometry.name = "Join Geometry"
+    
+    #node Combine XYZ
+    combine_xyz = proton_spots.nodes.new("ShaderNodeCombineXYZ")
+    combine_xyz.name = "Combine XYZ"
+    
+    #node Curve Line
+    curve_line = proton_spots.nodes.new("GeometryNodeCurvePrimitiveLine")
+    curve_line.name = "Curve Line"
+    curve_line.mode = 'POINTS'
+    #Direction
+    curve_line.inputs[2].default_value = (0.0, 0.0, 1.0)
+    #Length
+    curve_line.inputs[3].default_value = 1.0
+    
+    #node Curve to Mesh
+    curve_to_mesh = proton_spots.nodes.new("GeometryNodeCurveToMesh")
+    curve_to_mesh.name = "Curve to Mesh"
+    #Fill Caps
+    curve_to_mesh.inputs[2].default_value = True
+    
+    #node Set Material.001
+    set_material_001 = proton_spots.nodes.new("GeometryNodeSetMaterial")
+    set_material_001.name = "Set Material.001"
+    #Selection
+    set_material_001.inputs[1].default_value = True
+    
+    #node Object Info
+    object_info = proton_spots.nodes.new("GeometryNodeObjectInfo")
+    object_info.name = "Object Info"
+    object_info.transform_space = 'RELATIVE'
+    #As Instance
+    object_info.inputs[1].default_value = False
+    
+    #node Group Input
+    group_input = proton_spots.nodes.new("NodeGroupInput")
+    group_input.name = "Group Input"
+    
+    #node Mesh to Points
+    mesh_to_points = proton_spots.nodes.new("GeometryNodeMeshToPoints")
+    mesh_to_points.name = "Mesh to Points"
+    mesh_to_points.mode = 'VERTICES'
+    #Selection
+    mesh_to_points.inputs[1].default_value = True
+    #Position
+    mesh_to_points.inputs[2].default_value = (0.0, 0.0, 0.0)
+    #Radius
+    mesh_to_points.inputs[3].default_value = 0.03999999910593033
+    
+    #node Math
+    math = proton_spots.nodes.new("ShaderNodeMath")
+    math.name = "Math"
+    math.operation = 'MULTIPLY'
+    math.use_clamp = False
+    #Value_002
+    math.inputs[2].default_value = 0.5
+    
+    #node Curve Circle
+    curve_circle = proton_spots.nodes.new("GeometryNodeCurvePrimitiveCircle")
+    curve_circle.name = "Curve Circle"
+    curve_circle.mode = 'RADIUS'
+    #Resolution
+    curve_circle.inputs[0].default_value = 32
+    #Point 1
+    curve_circle.inputs[1].default_value = (-1.0, 0.0, 0.0)
+    #Point 2
+    curve_circle.inputs[2].default_value = (0.0, 1.0, 0.0)
+    #Point 3
+    curve_circle.inputs[3].default_value = (1.0, 0.0, 0.0)
+    
+    #node Integer
+    integer = proton_spots.nodes.new("FunctionNodeInputInt")
+    integer.name = "Integer"
+    integer.integer = 0
+    
+    #node Sample Index
+    sample_index = proton_spots.nodes.new("GeometryNodeSampleIndex")
+    sample_index.name = "Sample Index"
+    sample_index.clamp = False
+    sample_index.data_type = 'FLOAT_VECTOR'
+    sample_index.domain = 'POINT'
+    #Value_Float
+    sample_index.inputs[1].default_value = 0.0
+    #Value_Int
+    sample_index.inputs[2].default_value = 0
+    #Value_Color
+    sample_index.inputs[4].default_value = (0.0, 0.0, 0.0, 0.0)
+    #Value_Bool
+    sample_index.inputs[5].default_value = False
+    #Value_Rotation
+    sample_index.inputs[6].default_value = (0.0, 0.0, 0.0)
+    
+    
+    
+    
+    #Set locations
+    group_output.location = (1480.2779541015625, 19.099044799804688)
+    named_attribute.location = (-426.120849609375, -87.12943267822266)
+    named_attribute_001.location = (-425.32879638671875, -225.96890258789062)
+    set_point_radius.location = (745.5230712890625, 31.70229148864746)
+    named_attribute_002.location = (-431.665283203125, -344.9742126464844)
+    named_attribute_003.location = (85.49007415771484, -248.5247802734375)
+    set_position.location = (281.5804138183594, 64.17086029052734)
+    set_material.location = (965.8740234375, 44.36990737915039)
+    join_geometry.location = (1260.62890625, 60.034934997558594)
+    combine_xyz.location = (-175.42483520507812, -83.68736267089844)
+    curve_line.location = (527.5903930664062, 500.82733154296875)
+    curve_to_mesh.location = (803.3193969726562, 381.9040222167969)
+    set_material_001.location = (1040.62890625, 260.43365478515625)
+    object_info.location = (154.10342407226562, 485.97100830078125)
+    group_input.location = (-646.9298706054688, 44.036460876464844)
+    mesh_to_points.location = (-342.452392578125, 334.5898132324219)
+    math.location = (525.8740844726562, -106.29212951660156)
+    curve_circle.location = (596.175048828125, 275.4619445800781)
+    integer.location = (-109.27851867675781, 394.7320251464844)
+    sample_index.location = (332.0760192871094, 386.84661865234375)
+    
+    #Set dimensions
+    group_output.width, group_output.height = 140.0, 100.0
+    named_attribute.width, named_attribute.height = 140.0, 100.0
+    named_attribute_001.width, named_attribute_001.height = 140.0, 100.0
+    set_point_radius.width, set_point_radius.height = 140.0, 100.0
+    named_attribute_002.width, named_attribute_002.height = 140.0, 100.0
+    named_attribute_003.width, named_attribute_003.height = 140.0, 100.0
+    set_position.width, set_position.height = 140.0, 100.0
+    set_material.width, set_material.height = 140.0, 100.0
+    join_geometry.width, join_geometry.height = 140.0, 100.0
+    combine_xyz.width, combine_xyz.height = 140.0, 100.0
+    curve_line.width, curve_line.height = 140.0, 100.0
+    curve_to_mesh.width, curve_to_mesh.height = 140.0, 100.0
+    set_material_001.width, set_material_001.height = 140.0, 100.0
+    object_info.width, object_info.height = 140.0, 100.0
+    group_input.width, group_input.height = 140.0, 100.0
+    mesh_to_points.width, mesh_to_points.height = 140.0, 100.0
+    math.width, math.height = 140.0, 100.0
+    curve_circle.width, curve_circle.height = 140.0, 100.0
+    integer.width, integer.height = 140.0, 100.0
+    sample_index.width, sample_index.height = 140.0, 100.0
+    
+    #initialize proton_spots links
+    #join_geometry.Geometry -> group_output.Geometry
+    proton_spots.links.new(join_geometry.outputs[0], group_output.inputs[0])
+    #mesh_to_points.Points -> set_position.Geometry
+    proton_spots.links.new(mesh_to_points.outputs[0], set_position.inputs[0])
+    #named_attribute.Attribute -> combine_xyz.X
+    proton_spots.links.new(named_attribute.outputs[1], combine_xyz.inputs[0])
+    #named_attribute_001.Attribute -> combine_xyz.Y
+    proton_spots.links.new(named_attribute_001.outputs[1], combine_xyz.inputs[1])
+    #named_attribute_002.Attribute -> combine_xyz.Z
+    proton_spots.links.new(named_attribute_002.outputs[1], combine_xyz.inputs[2])
+    #combine_xyz.Vector -> set_position.Position
+    proton_spots.links.new(combine_xyz.outputs[0], set_position.inputs[2])
+    #set_position.Geometry -> set_point_radius.Points
+    proton_spots.links.new(set_position.outputs[0], set_point_radius.inputs[0])
+    #group_input.Geometry -> mesh_to_points.Mesh
+    proton_spots.links.new(group_input.outputs[0], mesh_to_points.inputs[0])
+    #math.Value -> set_point_radius.Radius
+    proton_spots.links.new(math.outputs[0], set_point_radius.inputs[2])
+    #named_attribute_003.Attribute -> math.Value
+    proton_spots.links.new(named_attribute_003.outputs[1], math.inputs[0])
+    #set_point_radius.Points -> set_material.Geometry
+    proton_spots.links.new(set_point_radius.outputs[0], set_material.inputs[0])
+    #object_info.Location -> curve_line.Start
+    proton_spots.links.new(object_info.outputs[0], curve_line.inputs[0])
+    #set_material.Geometry -> join_geometry.Geometry
+    proton_spots.links.new(set_material.outputs[0], join_geometry.inputs[0])
+    #combine_xyz.Vector -> sample_index.Value
+    proton_spots.links.new(combine_xyz.outputs[0], sample_index.inputs[3])
+    #group_input.Geometry -> sample_index.Geometry
+    proton_spots.links.new(group_input.outputs[0], sample_index.inputs[0])
+    #sample_index.Value -> curve_line.End
+    proton_spots.links.new(sample_index.outputs[2], curve_line.inputs[1])
+    #set_material_001.Geometry -> join_geometry.Geometry
+    proton_spots.links.new(set_material_001.outputs[0], join_geometry.inputs[0])
+    #curve_line.Curve -> curve_to_mesh.Curve
+    proton_spots.links.new(curve_line.outputs[0], curve_to_mesh.inputs[0])
+    #curve_circle.Curve -> curve_to_mesh.Profile Curve
+    proton_spots.links.new(curve_circle.outputs[0], curve_to_mesh.inputs[1])
+    #curve_to_mesh.Mesh -> set_material_001.Geometry
+    proton_spots.links.new(curve_to_mesh.outputs[0], set_material_001.inputs[0])
+    #group_input.Effective Source Empty -> object_info.Object
+    proton_spots.links.new(group_input.outputs[1], object_info.inputs[0])
+    #group_input.Point Size -> math.Value
+    proton_spots.links.new(group_input.outputs[2], math.inputs[1])
+    #group_input.Beam Radius -> curve_circle.Radius
+    proton_spots.links.new(group_input.outputs[3], curve_circle.inputs[4])
+    #group_input.Spot Index -> sample_index.Index
+    proton_spots.links.new(group_input.outputs[4], sample_index.inputs[7])
+    return proton_spots
+
+
+
+def add_proton_geo_nodes():
+    """
+    Adds the proton spots node group to the selected object
     """
 
-    node_tree = getattr(material, "node_tree", None)
-    if node_tree is None:
-        return
-    for node in getattr(node_tree, "nodes", ()):
-        for name, value in values.items():
-            socket = _socket(node, name)
-            if socket is None or getattr(socket, "is_linked", False):
-                continue
-            try:
-                if float(socket.default_value) <= 0.0:
-                    socket.default_value = float(value)
-            except (TypeError, ValueError):
-                continue
-
-
-def _windowed_material(
-    base_material: bpy.types.Material,
-    shader_name: str,
-    window: tuple[float, float],
-    zero_input_defaults: Optional[dict[str, float]] = None,
-) -> bpy.types.Material:
-    """Return a copy of ``base_material`` whose window spans ``window``.
-
-    Two scans rarely cover the same range of values, so the window cannot be
-    written into the shared material - that would rewindow every volume
-    already using it. A copy per window is cached by name and reused, the same
-    way per-ROI structure tints are.
-
-    ``zero_input_defaults`` fills in inputs the asset leaves at zero on the
-    new copy, via :func:`_fill_zero_inputs`.
-    """
-
-    # An edited or replaced asset may have nothing to window. Checking before
-    # copying keeps a stray datablock out of the file.
-    if not _window_sockets(base_material):
-        return base_material
-
-    low, high = window
-    base_name = f"{shader_name} - {low:g} to {high:g}"
-    for counter in range(100):
-        candidate = _variant_name(base_name, counter)
-        existing = bpy.data.materials.get(candidate)
-        if existing is None:
-            break
-        if _material_has_window(existing, window):
-            return existing
-    else:
-        return base_material
-
-    try:
-        material = base_material.copy()
-        material.name = candidate
-        _set_material_window(material, window)
-        if zero_input_defaults:
-            _fill_zero_inputs(material, zero_input_defaults)
-    except Exception:
-        return base_material
-
-    return material
-
-
-def apply_dicom_shader(
-    shader_name: str,
-    obj: Optional[bpy.types.Object] = None,
-    data_range: Optional[Sequence[float]] = None,
-    zero_input_defaults: Optional[dict[str, float]] = None,
-) -> bool:
-    """Attach the requested shader to ``obj``, appending the material when needed.
-
-    ``obj`` defaults to the active object, but callers that just created an
-    object should pass it explicitly - relying on the active object breaks when
-    an import path leaves a different object selected.
-
-    ``data_range`` is the span of values the volume's voxels cover. When given,
-    a copy of the material windowed onto that range is assigned instead of the
-    shared one, so a volume in Hounsfield units or Gy renders without the user
-    having to type its range into the shader. ``zero_input_defaults`` names
-    inputs the windowed copy should get when the asset leaves them at zero.
-    """
-
-    material = _load_material(shader_name)
-    if material is None:
-        return False
-
-    window = _valid_window(data_range)
-    if window is not None:
-        material = _windowed_material(material, shader_name, window, zero_input_defaults)
-
-    return _assign_material(obj if obj is not None else bpy.context.object, material)
-
-
-def _rgba(color: Sequence[float]) -> tuple[float, float, float, float]:
-    return (
-        float(color[0]),
-        float(color[1]),
-        float(color[2]),
-        float(color[3]) if len(color) > 3 else 1.0,
-    )
-
-
-def _set_material_color(material: bpy.types.Material, color: Sequence[float]) -> None:
-    """Tint a material copy with an RT structure's display colour."""
-
-    rgba = _rgba(color)
-    material.diffuse_color = rgba
-
-    node_tree = getattr(material, "node_tree", None)
-    if node_tree is None:
-        return
-    for node in node_tree.nodes:
-        color_input = node.inputs.get("Color") if hasattr(node, "inputs") else None
-        if color_input is not None and getattr(color_input, "type", "") == "RGBA" and not color_input.is_linked:
-            color_input.default_value = rgba
-
-
-def _material_has_color(material: bpy.types.Material, rgba: Sequence[float]) -> bool:
-    existing = getattr(material, "diffuse_color", None)
-    if existing is None:
-        return False
-    try:
-        return len(existing) >= 4 and all(
-            abs(float(a) - float(b)) <= 1e-6
-            for a, b in zip(rgba, existing, strict=True)
-        )
-    except (TypeError, ValueError):
-        return False
-
-
-def apply_structure_material(
-    obj: Optional[bpy.types.Object],
-    roi_name: str,
-    color: Optional[Sequence[float]] = None,
-    shader_name: str = "Structure Material",
-) -> bool:
-    """Assign a per-ROI copy of the structure material tinted with its colour.
-
-    Sharing one material across every ROI makes each imported structure render
-    identically, so ``ROIDisplayColor`` from the treatment planning system is
-    baked into a copy instead.
-
-    A cached tint is only reused when its colour still matches. Two structure
-    sets can use the same ROI name with different display colours, and reusing
-    the datablock on name alone gave the second import the first one's colour -
-    and retinting it in place would have recoloured the structure already in
-    the scene.
-    """
-
-    base_material = _load_material(shader_name)
-    if base_material is None:
-        return False
-
-    if color is None:
-        return _assign_material(obj, base_material)
-
-    rgba = _rgba(color)
-    base_name = f"{shader_name} - {roi_name}"
-    material = base_material
-    for counter in range(100):
-        candidate = _variant_name(base_name, counter)
-        existing = bpy.data.materials.get(candidate)
-        if existing is None:
-            try:
-                material = base_material.copy()
-                material.name = candidate
-                _set_material_color(material, rgba)
-            except Exception:
-                material = base_material
-            break
-        if _material_has_color(existing, rgba):
-            material = existing
-            break
-
-    return _assign_material(obj, material)
-
-
-#: Radius, in metres, of the heaviest spot in an imported plan. The node
-#: group draws each spot at ``spot_weight * Spot Size``, and the asset's Spot
-#: Size (0.1 mm per unit weight) was tuned on a plan whose heaviest spot
-#: weighed 12.97, so this keeps that look whatever units the plan's meterset
-#: weights are in.
-MAX_SPOT_RADIUS = 12.97 * 1e-4
-
-
-def _windowed_spot_node_group(node_group, window: tuple[float, float]):
-    """Return a copy of ``node_group`` whose spot material spans ``window``.
-
-    The Spot Material is chosen by a Set Material node inside the node group
-    rather than on the object, so windowing it means pointing a copy of the
-    node group at a windowed copy of the material. Both are cached by window,
-    the same way windowed image materials are.
-    """
-
-    replacements = {}
-    for node in getattr(node_group, "nodes", ()):
-        if getattr(node, "bl_idname", "") != "GeometryNodeSetMaterial":
-            continue
-        socket = _socket(node, "Material")
-        material = getattr(socket, "default_value", None)
-        if material is None or getattr(socket, "is_linked", False):
-            continue
-        windowed = _windowed_material(material, material.name, window)
-        if windowed is not material:
-            replacements[node.name] = windowed
-    if not replacements:
-        return node_group
-
-    low, high = window
-    base_name = f"{node_group.name} - {low:g} to {high:g}"
-    for counter in range(100):
-        candidate = _variant_name(base_name, counter)
-        existing = bpy.data.node_groups.get(candidate)
-        if existing is None:
-            break
-        if _material_has_window(existing, window):
-            return existing
-    else:
-        return node_group
-
-    try:
-        windowed_group = node_group.copy()
-        windowed_group.name = candidate
-        for node_name, material in replacements.items():
-            windowed_group.nodes[node_name].inputs["Material"].default_value = material
-        windowed_group[_WINDOW_PROPERTY] = [float(low), float(high)]
-    except Exception:
-        return node_group
-    return windowed_group
-
-
-def _set_modifier_input(modifier, name: str, value: float) -> bool:
-    """Set a geometry nodes modifier input by its interface name."""
-
-    interface = getattr(getattr(modifier, "node_group", None), "interface", None)
-    for item in getattr(interface, "items_tree", ()):
-        if getattr(item, "in_out", None) != "INPUT" or getattr(item, "name", None) != name:
-            continue
-        try:
-            modifier[item.identifier] = float(value)
-        except Exception:
-            return False
-        return True
-    return False
-
-
-def apply_proton_spots_geo_nodes(
-    node_tree_name: str = "Proton_Spots",
-    obj: Optional[bpy.types.Object] = None,
-    weight_range: Optional[Sequence[float]] = None,
-) -> Optional[bpy.types.Modifier]:
-    """Ensure the proton geometry nodes modifier is present on ``obj``.
-
-    ``weight_range`` is the span of spot meterset weights in the plan. When
-    given, the spot colours are windowed onto it and the Spot Size is scaled
-    so the heaviest spot is drawn at :data:`MAX_SPOT_RADIUS`. The asset's
-    fixed window and size otherwise only suit plans whose weights happen to
-    be in the same units as the one it was tuned on.
-    """
-
-    if node_tree_name not in bpy.data.node_groups:
-        try:
-            append_item_from_blend(_blend_library_path(), "NodeTree", node_tree_name)
-        except Exception:
-            pass
-
-    node_group = bpy.data.node_groups.get(node_tree_name)
-    if node_group is None:
-        show_message_box(
-            f"Node group '{node_tree_name}' could not be loaded from the MedBlend asset library.",
-            "Warning",
-            "ERROR",
-        )
-        return None
-
-    if obj is None:
-        obj = bpy.context.active_object
-    if obj is None:
-        return None
-
-    window = _valid_window(weight_range)
-    if window is not None:
-        node_group = _windowed_spot_node_group(node_group, window)
-
-    geomod = obj.modifiers.get("GeometryNodes")
-    if not geomod:
-        geomod = obj.modifiers.new("GeometryNodes", "NODES")
-
-    geomod.node_group = node_group
-    if window is not None:
-        _set_modifier_input(geomod, "Spot Size", MAX_SPOT_RADIUS / window[1])
-    return geomod
+    proton_spots = proton_spots_node_group()    
+    name = bpy.context.object.name
+    obj = bpy.data.objects[name]
+    mod = obj.modifiers.new(name = "Proton_Spots", type = 'NODES')
+    mod.node_group = proton_spots
